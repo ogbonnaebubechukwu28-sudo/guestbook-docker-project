@@ -1,175 +1,173 @@
-# Guestbook Application
+# Guestbook Application — Dockerized
 
 ## Overview
+This is a simple Guestbook application built with Python Flask and Redis, containerized using Docker and orchestrated with Docker Compose. Users can submit messages through a web form, and messages are stored persistently in Redis.
 
-This is a simple Guestbook application built with Python Flask and Redis.
+The application was provided as starter code; this repository adds full containerization, networking, persistent storage, and security scanning.
 
-The application allows users to:
+## Architecture
 
-* Submit messages through a web interface
-* Store messages in Redis
-* View all submitted messages
-
-The application consists of two components:
-
-1. Flask Web Application
-2. Redis Database
-
-Your task is to containerize the application using Docker and deploy it using Docker Compose.
-
----
-
-# Application Architecture
-
-```text
+```
 User
   |
   v
-Flask Web Application
+Flask Web Application (port 5000)
   |
   v
-Redis Database
+Redis Database (port 6379)
 ```
 
-The Flask application stores and retrieves messages from Redis.
+Both services run in separate containers connected via a custom Docker bridge network, allowing the Flask app to reach Redis using the hostname `redis`.
 
----
+## Project Structure
 
-# Project Structure
-
-```text
-guestbook-app/
-│
+```
+guestbook-docker-project/
 ├── app.py
 ├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
 └── README.md
 ```
 
----
+## Docker Implementation
 
-# Prerequisites
+### Dockerfile
+```dockerfile
+FROM python:alpine
 
-Install the following on your local machine:
+WORKDIR /app
 
-* Python 3.10 or newer
-* Redis Server
-* Git
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
----
+COPY . .
 
-# Running the Application Locally
+EXPOSE 5000
 
-## Step 1: Clone the Repository
+CMD ["python", "app.py"]
+```
+
+### docker-compose.yml
+```yaml
+version: "3.9"
+
+services:
+  web:
+    build: .
+    container_name: guestbook_web
+    ports:
+      - "5000:5000"
+    depends_on:
+      - redis
+    networks:
+      - guestbook_network
+
+  redis:
+    image: redis:alpine
+    container_name: guestbook_redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - guestbook_network
+
+networks:
+  guestbook_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+```
+
+## Docker Network
+Both containers communicate over a custom bridge network (`guestbook_network`). The Flask app connects to Redis using the service name `redis` as the hostname, rather than an IP address, since Docker Compose handles internal DNS resolution between containers on the same network.
+
+## Docker Volume (Persistence)
+Redis data is persisted using a named Docker volume (`redis_data`), mounted to `/data` inside the Redis container. This ensures that guestbook messages survive container recreation.
+
+**Persistence was tested by:**
+1. Submitting a test message via the web form
+2. Running `docker-compose down` (stopping and removing containers, but not the volume)
+3. Running `docker-compose up -d` (recreating containers)
+4. Confirming the test message was still present after restart
+
+✅ Test passed — messages persisted correctly across container recreation.
+
+## Running the Application
 
 ```bash
-git clone <repository-url>
-cd guestbook-app
+git clone https://github.com/ogbonnaebubechukwu28-sudo/guestbook-docker-project.git
+cd guestbook-docker-project
+docker-compose up -d
 ```
 
----
+Visit the app at: `http://localhost:5000`
 
-## Step 2: Create a Virtual Environment
+To stop the application:
+```bash
+docker-compose down
+```
 
-Linux/Mac:
+## Docker Scout — Vulnerability Scan
+
+Initial scan using `python:3.10-slim` as the base image revealed **88 vulnerabilities** (1 Critical, 18 High, 18 Medium, 49 Low, 2 Unspecified), primarily from outdated OS-level packages (`openssl`, `perl`, `glibc`).
+
+Using `docker scout recommendations`, the base image was switched to **`python:alpine`**, which Docker Scout identified as the most secure available option.
+
+### Before (python:3.10-slim)
+| Severity | Count |
+|----------|-------|
+| Critical | 1 |
+| High | 18 |
+| Medium | 18 |
+| Low | 49 |
+| Unspecified | 2 |
+| **Total** | **88** |
+
+### After (python:alpine)
+| Severity | Count |
+|----------|-------|
+| Critical | 0 |
+| High | 0 |
+| Medium | 0 |
+| Low | 0 |
+| **Total** | **0** |
+
+**Result:** Switching the base image eliminated all detected vulnerabilities while also reducing image size from 51 MB to 26 MB.
+
+Scan command used:
+```bash
+docker scout cves ogbonnaebubechukwu28/guestbook-app:latest
+```
+
+## Docker Hub
+The final image is available on Docker Hub:
+
+**Image:** `ogbonnaebubechukwu28/guestbook-app:latest`
+**Link:** https://hub.docker.com/r/ogbonnaebubechukwu28/guestbook-app
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+docker pull ogbonnaebubechukwu28/guestbook-app:latest
 ```
 
-Windows:
+## Challenges and Solutions
 
-```bash
-python -m venv venv
-venv\Scripts\activate
-```
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| `docker: unknown command: docker compose` | Older Docker version without the integrated `compose` plugin | Used the legacy hyphenated `docker-compose` command instead |
+| `docker scout cves` failed with "unknown command" | Docker Scout CLI plugin not installed | Installed manually via the official install script |
+| `permission denied while trying to connect to the docker API` | User not in the `docker` group | Added user to `docker` group with `usermod -aG docker $USER` and restarted WSL session |
+| Initial scan showed 88 vulnerabilities | Base image (`python:3.10-slim`) had outdated OS packages | Switched to `python:alpine`, reducing vulnerabilities to 0 |
+
+## Lessons Learned
+- How Docker Compose manages multi-container networking automatically using service names as hostnames
+- The difference between `docker-compose down` and `docker-compose down -v` and how that affects volume persistence
+- How to use Docker Scout to assess image vulnerabilities and make informed base image decisions
+- The trade-offs between Debian-based and Alpine-based images in terms of size and security surface
 
 ---
 
-## Step 3: Install Dependencies
-
-```bash
-pip install -r requirements.txt
+**Author:** Ebubechukwu Ogbonna
+**GitHub Repository:** https://github.com/ogbonnaebubechukwu28-sudo/guestbook-docker-project
+**Docker Hub:** https://hub.docker.com/u/ogbonnaebubechukwu28
 ```
-
----
-
-## Step 4: Start Redis
-
-Ensure Redis is running on your machine.
-
-Linux:
-
-```bash
-sudo systemctl start redis
-```
-
-Verify:
-
-```bash
-redis-cli ping
-```
-
-Expected output:
-
-```text
-PONG
-```
-
----
-
-## Step 5: Run the Application
-
-```bash
-python app.py
-```
-
-Expected output:
-
-```text
-Running on http://0.0.0.0:5000
-```
-
----
-
-## Step 6: Access the Application
-
-Open your browser and visit:
-
-```text
-http://localhost:5000
-```
-
-You should see:
-
-* A message submission form
-* Previously submitted messages
-
----
-
-# Assignment Requirements
-
-Using the provided source code:
-
-1. Create a Dockerfile for the Flask application.
-2. Build a Docker image.
-3. Create a Docker Compose configuration.
-4. Configure communication between the application and Redis containers.
-5. Configure persistent storage for Redis using Docker Volumes.
-6. Scan the image using Docker Scout.
-7. Push the final image to Docker Hub.
-8. Document your implementation in your own README.
-
----
-
-# Expected Outcome
-
-After containerization:
-
-* The application should run using Docker Compose.
-* Redis data should persist after container recreation.
-* The application should communicate with Redis through a Docker network.
-* The image should be available on Docker Hub.
-* Docker Scout scan results should be documented.
-
-Good luck!
